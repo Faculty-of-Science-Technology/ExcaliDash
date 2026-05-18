@@ -11,6 +11,7 @@ interface Config {
   port: number;
   nodeEnv: string;
   databaseUrl?: string;
+  dbProvider: DbProvider;
   frontendUrl?: string;
   authMode: AuthMode;
   jwtSecret: string;
@@ -29,6 +30,7 @@ interface Config {
 }
 
 export type AuthMode = "local" | "hybrid" | "oidc_enforced";
+export type DbProvider = "sqlite" | "postgresql";
 
 interface OidcConfig {
   enabled: boolean;
@@ -166,6 +168,16 @@ const resolveDatabaseUrl = (rawUrl?: string) => {
 
 process.env.DATABASE_URL = resolveDatabaseUrl(process.env.DATABASE_URL);
 
+const detectDbProvider = (): DbProvider => {
+  const explicit = process.env.DB_PROVIDER;
+  if (explicit === "postgresql" || explicit === "sqlite") return explicit;
+  const url = process.env.DATABASE_URL || "";
+  if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
+    return "postgresql";
+  }
+  return "sqlite";
+};
+
 const getOptionalBoolean = (key: string, defaultValue: boolean): boolean => {
   const value = process.env[key];
   if (!value) return defaultValue;
@@ -291,6 +303,7 @@ export const config: Config = {
   port: getRequiredEnvNumber("PORT", 8000),
   nodeEnv: getOptionalEnv("NODE_ENV", "development"),
   databaseUrl: process.env.DATABASE_URL,
+  dbProvider: detectDbProvider(),
   frontendUrl: parseFrontendUrl(process.env.FRONTEND_URL),
   authMode: resolvedAuthMode,
   jwtSecret: resolveJwtSecret(getOptionalEnv("NODE_ENV", "development")),
