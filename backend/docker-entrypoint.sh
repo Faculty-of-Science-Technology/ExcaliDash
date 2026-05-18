@@ -7,6 +7,28 @@ MIGRATION_LOCK_DIR="/app/prisma/.migration-lock"
 MIGRATION_LOCK_TIMEOUT_SECONDS="${MIGRATION_LOCK_TIMEOUT_SECONDS:-120}"
 RUN_MIGRATIONS="${RUN_MIGRATIONS:-true}"
 
+# ---------------------------------------------------------------------------
+# Detect database provider from DB_PROVIDER env or DATABASE_URL pattern
+# ---------------------------------------------------------------------------
+detect_provider() {
+  if [ -n "${DB_PROVIDER:-}" ]; then
+    echo "${DB_PROVIDER}"
+    return
+  fi
+  case "${DATABASE_URL:-}" in
+    postgresql://*|postgres://*)
+      echo "postgresql"
+      ;;
+    *)
+      echo "sqlite"
+      ;;
+  esac
+}
+
+DB_PROVIDER="$(detect_provider)"
+export DB_PROVIDER
+echo "Database provider: ${DB_PROVIDER}"
+
 # Ensure JWT secret exists for production startup.
 # Backward compatibility: older installs may not have JWT_SECRET configured.
 if [ -z "${JWT_SECRET:-}" ]; then
@@ -72,8 +94,8 @@ chmod 755 /app/uploads
 chmod 600 "${JWT_SECRET_FILE}"
 chmod 600 "${CSRF_SECRET_FILE}"
 
-# Ensure database file has proper permissions
-if [ -f "/app/prisma/dev.db" ]; then
+# Ensure SQLite database file has proper permissions (skip for PostgreSQL)
+if [ "${DB_PROVIDER}" = "sqlite" ] && [ -f "/app/prisma/dev.db" ]; then
     echo "Database file found, ensuring write permissions..."
     chmod 600 /app/prisma/dev.db
 fi
@@ -84,26 +106,35 @@ fi
 # - This lock coordinates startup when multiple containers share the same volume.
 # - For Kubernetes, the safest pattern is still: run migrations once via a Job/init container
 #   and set RUN_MIGRATIONS=false on the main deployment.
+# PostgreSQL note:
+# - PostgreSQL handles concurrent migrations natively via advisory locks, so the
+#   filesystem-based lock is only needed for SQLite.
 if [ "${RUN_MIGRATIONS}" = "true" ] || [ "${RUN_MIGRATIONS}" = "1" ]; then
     echo "Running database migrations..."
 
-    lock_waited=0
-    while ! mkdir "${MIGRATION_LOCK_DIR}" 2>/dev/null; do
-        if [ "${lock_waited}" -ge "${MIGRATION_LOCK_TIMEOUT_SECONDS}" ]; then
-            echo "Timed out waiting for migration lock after ${MIGRATION_LOCK_TIMEOUT_SECONDS}s"
-            exit 1
-        fi
-        lock_waited=$((lock_waited + 1))
-        sleep 1
-    done
+    if [ "${DB_PROVIDER}" = "sqlite" ]; then
+        # Filesystem lock for SQLite only
+        lock_waited=0
+        while ! mkdir "${MIGRATION_LOCK_DIR}" 2>/dev/null; do
+            if [ "${lock_waited}" -ge "${MIGRATION_LOCK_TIMEOUT_SECONDS}" ]; then
+                echo "Timed out waiting for migration lock after ${MIGRATION_LOCK_TIMEOUT_SECONDS}s"
+                exit 1
+            fi
+            lock_waited=$((lock_waited + 1))
+            sleep 1
+        done
 
-    # Best-effort cleanup so future startups don't block forever.
-    trap 'rmdir "${MIGRATION_LOCK_DIR}" 2>/dev/null || true' EXIT INT TERM
+        # Best-effort cleanup so future startups don't block forever.
+        trap 'rmdir "${MIGRATION_LOCK_DIR}" 2>/dev/null || true' EXIT INT TERM
 
-    su-exec nodejs npx prisma migrate deploy
+        su-exec nodejs npx prisma migrate deploy
 
-    rmdir "${MIGRATION_LOCK_DIR}" 2>/dev/null || true
-    trap - EXIT INT TERM
+        rmdir "${MIGRATION_LOCK_DIR}" 2>/dev/null || true
+        trap - EXIT INT TERM
+    else
+        # PostgreSQL — run migrations directly (PG has its own locking)
+        su-exec nodejs npx prisma migrate deploy
+    fi
 else
     echo "Skipping database migrations (RUN_MIGRATIONS=${RUN_MIGRATIONS})"
 fi

@@ -1,8 +1,15 @@
 #!/bin/sh
-# setup-db.sh — Detect the database provider from DATABASE_URL and configure
-# Prisma schema + migrations accordingly.
+# setup-db.sh — Configure Prisma schema and migrations for the target database.
 #
-# Usage:
+# Provider selection (checked in order):
+#   1. DB_PROVIDER env var           (build-time, e.g. DB_PROVIDER=postgresql)
+#   2. First positional argument     (e.g. ./setup-db.sh postgresql)
+#   3. Auto-detect from DATABASE_URL (runtime fallback)
+#
+# Usage (build-time — Docker / CI):
+#   DB_PROVIDER=postgresql ./prisma/setup-db.sh
+#
+# Usage (local dev — auto-detect):
 #   DATABASE_URL="postgresql://..." ./prisma/setup-db.sh
 #   DATABASE_URL="file:./dev.db"    ./prisma/setup-db.sh
 #
@@ -14,11 +21,23 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCHEMA_FILE="${SCHEMA_FILE:-${SCRIPT_DIR}/schema.prisma}"
 
 # ---------------------------------------------------------------------------
-# Detect provider from DATABASE_URL
+# Resolve provider
 # ---------------------------------------------------------------------------
-detect_provider() {
-  local url="${DATABASE_URL:-}"
-  case "$url" in
+resolve_provider() {
+  # 1. Explicit env var
+  if [ -n "${DB_PROVIDER:-}" ]; then
+    echo "${DB_PROVIDER}"
+    return
+  fi
+
+  # 2. Positional argument
+  if [ -n "${1:-}" ]; then
+    echo "$1"
+    return
+  fi
+
+  # 3. Auto-detect from DATABASE_URL
+  case "${DATABASE_URL:-}" in
     postgresql://*|postgres://*)
       echo "postgresql"
       ;;
@@ -28,44 +47,47 @@ detect_provider() {
   esac
 }
 
-PROVIDER="$(detect_provider)"
-echo "[setup-db] Detected database provider: ${PROVIDER}"
+PROVIDER="$(resolve_provider "${1:-}")"
+
+# Validate
+case "${PROVIDER}" in
+  sqlite|postgresql) ;;
+  *)
+    echo "[setup-db] ERROR: unsupported provider '${PROVIDER}'. Must be 'sqlite' or 'postgresql'." >&2
+    exit 1
+    ;;
+esac
+
+echo "[setup-db] Database provider: ${PROVIDER}"
 
 # ---------------------------------------------------------------------------
 # Rewrite the datasource provider in schema.prisma
 # ---------------------------------------------------------------------------
 if [ -f "${SCHEMA_FILE}" ]; then
-  # Replace provider = "sqlite" or provider = "postgresql" with the detected one
   sed -i "s/provider *= *\"sqlite\"/provider = \"${PROVIDER}\"/" "${SCHEMA_FILE}"
   sed -i "s/provider *= *\"postgresql\"/provider = \"${PROVIDER}\"/" "${SCHEMA_FILE}"
-  echo "[setup-db] Updated ${SCHEMA_FILE} provider to \"${PROVIDER}\""
+  echo "[setup-db] Updated ${SCHEMA_FILE} → provider = \"${PROVIDER}\""
 else
   echo "[setup-db] WARNING: ${SCHEMA_FILE} not found — skipping provider rewrite"
 fi
 
 # ---------------------------------------------------------------------------
-# Copy the correct migrations directory
+# Install the correct migrations
 # ---------------------------------------------------------------------------
-MIGRATIONS_SRC="${SCRIPT_DIR}/migrations-${PROVIDER}"
-# Fallback: if provider is sqlite the existing migrations/ dir is already correct
 if [ "${PROVIDER}" = "sqlite" ]; then
-  # For SQLite, the default migrations/ directory is already correct.
-  # If running inside Docker, the entrypoint copies from prisma_template.
-  echo "[setup-db] Using default SQLite migrations"
+  echo "[setup-db] Using default SQLite migrations (migrations/)"
 else
+  MIGRATIONS_SRC="${SCRIPT_DIR}/migrations-${PROVIDER}"
   if [ -d "${MIGRATIONS_SRC}" ]; then
-    echo "[setup-db] Copying ${PROVIDER} migrations from ${MIGRATIONS_SRC}..."
-    # Ensure migrations dir exists
+    echo "[setup-db] Installing ${PROVIDER} migrations from ${MIGRATIONS_SRC}..."
     mkdir -p "${SCRIPT_DIR}/migrations"
-    # Remove existing SQLite migrations (they are incompatible)
     rm -rf "${SCRIPT_DIR}/migrations/"*
-    # Copy PostgreSQL migrations into place
     cp -R "${MIGRATIONS_SRC}/." "${SCRIPT_DIR}/migrations/"
-    echo "[setup-db] PostgreSQL migrations installed"
+    echo "[setup-db] ${PROVIDER} migrations installed"
   else
-    echo "[setup-db] WARNING: No migrations directory found at ${MIGRATIONS_SRC}"
-    echo "[setup-db] You may need to run 'npx prisma migrate dev --name init' to create initial migrations"
+    echo "[setup-db] WARNING: No migrations found at ${MIGRATIONS_SRC}"
+    echo "[setup-db] Run 'npx prisma migrate dev --name init' to create initial migrations."
   fi
 fi
 
-echo "[setup-db] Database setup complete (provider=${PROVIDER})"
+echo "[setup-db] Done (provider=${PROVIDER})"

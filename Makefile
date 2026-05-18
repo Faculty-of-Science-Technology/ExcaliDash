@@ -1,5 +1,6 @@
 .PHONY: help install dev build test test-frontend test-backend test-e2e test-e2e-docker \
         lint lint-frontend lint-backend clean docker-build docker-run docker-down docker-logs \
+        docker-postgres-build docker-postgres-run docker-postgres-run-detached docker-postgres-down docker-postgres-logs \
         release pre-release version-bump changelog changelog-open changelog-keep db-migrate db-reset
 
 DOCKER_USERNAME := zimengxiong
@@ -198,6 +199,29 @@ docker-ps: ## Show running Docker containers
 docker-restart: docker-down docker-run ## Restart Docker containers
 
 docker-rebuild: docker-down docker-build docker-run ## Rebuild and restart containers
+
+# ── PostgreSQL Docker targets ──────────────────────────────────────────────
+docker-postgres-build: ## Build Docker images for PostgreSQL
+	@echo "Building Docker images (PostgreSQL)..."
+	docker compose -f docker-compose.postgres.yml build
+	@echo "Docker images built (PostgreSQL)."
+
+docker-postgres-run: ## Start PostgreSQL Docker containers
+	@echo "Starting Docker containers (PostgreSQL)..."
+	docker compose -f docker-compose.postgres.yml up
+
+docker-postgres-run-detached: ## Start PostgreSQL Docker containers in background
+	@echo "Starting Docker containers (PostgreSQL, detached)..."
+	docker compose -f docker-compose.postgres.yml up -d
+	@echo "Containers started (PostgreSQL). Access at http://localhost:6767"
+
+docker-postgres-down: ## Stop PostgreSQL Docker containers
+	@echo "Stopping Docker containers (PostgreSQL)..."
+	docker compose -f docker-compose.postgres.yml down
+	@echo "Containers stopped (PostgreSQL)."
+
+docker-postgres-logs: ## Show PostgreSQL Docker container logs
+	docker compose -f docker-compose.postgres.yml logs -f
 
 version: ## Show current version
 	@echo "Current version: $(VERSION)"

@@ -125,6 +125,17 @@ const forceSingleUserDevMode = async () => {
 };
 
 const main = async () => {
+  // Configure Prisma schema + migrations for the detected database provider
+  try {
+    execSync("sh prisma/setup-db.sh", {
+      cwd: backendRoot,
+      stdio: "inherit",
+      env: { ...process.env, DATABASE_URL: databaseUrl },
+    });
+  } catch (err) {
+    console.warn("[predev] setup-db.sh failed (non-fatal for SQLite default):", err.message);
+  }
+
   const deploy = runCapture("npx prisma migrate deploy");
   if (deploy.ok) {
     if (deploy.stdout) process.stdout.write(deploy.stdout);

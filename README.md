@@ -359,13 +359,78 @@ docker compose -f docker-compose.oidc.yml down
 </details>
 
 <details>
+<summary>PostgreSQL Deployment</summary>
+
+### PostgreSQL Deployment
+
+ExcaliDash supports PostgreSQL as an alternative to the default SQLite database. PostgreSQL is recommended for multi-instance / high-availability deployments.
+
+**Quick start (Docker Compose from source):**
+
+```bash
+# Clone the repo, then:
+docker compose -f docker-compose.postgres.yml build
+docker compose -f docker-compose.postgres.yml up -d
+# Access the frontend at localhost:6767
+```
+
+**Quick start (Makefile):**
+
+```bash
+make docker-postgres-build
+make docker-postgres-run-detached
+```
+
+**Environment variables:**
+
+| Variable            | Default / Example                                                | Description                                  |
+| ------------------- | ---------------------------------------------------------------- | -------------------------------------------- |
+| `DB_PROVIDER`       | `sqlite`                                                         | Set to `postgresql` for PostgreSQL builds.   |
+| `DATABASE_URL`      | `postgresql://excalidash:excalidash@postgres:5432/excalidash`    | PostgreSQL connection string.                |
+| `POSTGRES_USER`     | `excalidash`                                                     | PostgreSQL superuser (compose only).         |
+| `POSTGRES_PASSWORD` | `excalidash`                                                     | PostgreSQL password (compose only).          |
+| `POSTGRES_DB`       | `excalidash`                                                     | PostgreSQL database name (compose only).     |
+
+**Building a PostgreSQL Docker image manually:**
+
+```bash
+cd backend
+docker build --build-arg DB_PROVIDER=postgresql -t excalidash-backend:postgres .
+```
+
+**Local development with PostgreSQL:**
+
+```bash
+# Start a local PostgreSQL (e.g., via Docker):
+docker run -d --name pg -e POSTGRES_PASSWORD=excalidash -e POSTGRES_DB=excalidash -p 5432:5432 postgres:16-alpine
+
+# Configure backend:
+cd backend
+cp .env.example .env
+# Edit .env:
+#   DATABASE_URL=postgresql://postgres:excalidash@localhost:5432/excalidash
+#   DB_PROVIDER=postgresql
+
+npm run build   # runs setup-db.sh + prisma generate + tsc
+npx prisma migrate deploy
+npm run dev
+```
+
+> **Note:** SQLite and PostgreSQL use separate, provider-specific migration histories.
+> You cannot migrate an existing SQLite database to PostgreSQL automatically.
+> For new PostgreSQL deployments, migrations create all tables from scratch.
+
+</details>
+
+<details>
 <summary>Configuration (Backend Environment Variables)</summary>
 
 Base values are documented in `backend/.env.example`. Common ones to care about:
 
 | Variable                 | Default / Example         | Description                                                                         |
 | ------------------------ | ------------------------- | ----------------------------------------------------------------------------------- |
-| `DATABASE_URL`           | `file:/app/prisma/dev.db` | SQLite file or external DB URL.                                                     |
+| `DATABASE_URL`           | `file:/app/prisma/dev.db` | SQLite file path or PostgreSQL connection string.                                   |
+| `DB_PROVIDER`            | _(auto-detected)_         | `sqlite` or `postgresql`. Auto-detected from `DATABASE_URL` when not set.           |
 | `FRONTEND_URL`           | `http://localhost:6767`   | Allowed frontend origin(s), comma-separated for multiple entries.                   |
 | `TRUST_PROXY`            | `false`                   | `false`, `true`, or hop count (for example `1`).                                    |
 | `JWT_SECRET`             | `change-this-secret...`   | Recommended in production so sessions remain stable across restarts and migrations. |

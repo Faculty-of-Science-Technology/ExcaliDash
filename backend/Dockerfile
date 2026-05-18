@@ -3,6 +3,10 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Database provider: "sqlite" (default) or "postgresql"
+ARG DB_PROVIDER=sqlite
+ENV DB_PROVIDER=${DB_PROVIDER}
+
 # Native build deps for modules that may compile from source (e.g., better-sqlite3 on arm64)
 RUN apk add --no-cache python3 make g++
 
@@ -13,8 +17,11 @@ COPY tsconfig.json ./
 # Install dependencies
 RUN npm ci && npm cache clean --force
 
-# Copy prisma schema
+# Copy prisma schema and all migration variants
 COPY prisma ./prisma/
+
+# Configure database provider and install correct migrations
+RUN sh prisma/setup-db.sh
 
 # Generate Prisma Client
 RUN npx prisma generate
@@ -27,6 +34,10 @@ RUN npx tsc
 
 # Production stage
 FROM node:20-alpine
+
+# Database provider: "sqlite" (default) or "postgresql"
+ARG DB_PROVIDER=sqlite
+ENV DB_PROVIDER=${DB_PROVIDER}
 
 # Install runtime packages and create non-root user
 RUN apk add --no-cache openssl su-exec && \
@@ -44,9 +55,12 @@ RUN apk add --no-cache --virtual .build-deps python3 make g++ && \
     npm cache clean --force && \
     apk del .build-deps
 
-# Copy prisma schema and migrations for runtime and hydration template
+# Copy prisma schema and all migration variants for runtime and hydration template
 COPY prisma ./prisma/
-COPY prisma ./prisma_template/
+# Configure provider + install correct migrations in the runtime prisma dir
+RUN sh prisma/setup-db.sh
+# Create the hydration template from the configured prisma dir
+RUN cp -R prisma prisma_template
 
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
