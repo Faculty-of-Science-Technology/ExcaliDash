@@ -9,8 +9,8 @@ import {
 } from 'react';
 import { Socket } from 'socket.io-client';
 import { toast } from 'sonner';
-import type { ChatAttachment, ChatMessage, ChatMessagePayload, ChatPinPayload, ChatThread, ChatUnpinPayload } from './ChatTypes';
 import { ChatThreadView } from './ChatThread';
+import type { ChatAttachment, ChatMessage, ChatMessagePayload, ChatPinPayload, ChatThread, ChatUnpinPayload } from './ChatTypes';
 import { useChatStorage } from './useChatStorage';
 
 interface Peer {
@@ -255,7 +255,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(({
   }, []);
 
   return (
-    <div className="fixed right-0 top-0 h-full w-80 z-[60] flex flex-col bg-white dark:bg-neutral-900 border-l border-slate-200 dark:border-neutral-700 shadow-2xl">
+    <div className="fixed right-0 top-0 h-full w-[23rem] z-[60] flex flex-col bg-white dark:bg-neutral-900 border-l border-slate-200 dark:border-neutral-700 shadow-2xl">
 
       {/* New thread dialog */}
       {isCreatingThread && (

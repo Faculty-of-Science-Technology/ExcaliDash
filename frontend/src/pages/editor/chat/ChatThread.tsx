@@ -206,7 +206,8 @@ const MessageBubble: React.FC<{
   message: ChatMessage;
   isMine: boolean;
   isPinboard: boolean;
-  isGrouped: boolean;
+  /** Whether to show the timestamp + actions row below the bubble (last in group / standalone) */
+  showTimestamp: boolean;
   threads: ChatThread[];
   resolveMessage: (id: string) => Promise<ChatMessage | undefined>;
   onSwitchThread: (threadId: string) => void;
@@ -214,14 +215,30 @@ const MessageBubble: React.FC<{
   onReply: (msgId: string) => void;
   onPin: (message: ChatMessage) => void;
   onUnpin: (originalMessageId: string) => void;
-}> = ({ message, isMine, isPinboard, isGrouped, threads, resolveMessage, onSwitchThread, onJumpToMessage, onReply, onPin, onUnpin }) => {
+}> = ({ message, isMine, isPinboard, showTimestamp, threads, resolveMessage, onSwitchThread, onJumpToMessage, onReply, onPin, onUnpin }) => {
   const [lightbox, setLightbox] = useState<{ src: string; name: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const bubbleRef = useRef<HTMLDivElement>(null);
 
   const time = new Date(message.timestamp).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
   });
+
+  const isLong = (message.body?.length ?? 0) > 32 || message.attachments.length > 0;
+
+  // Click-away listener to close actions
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (bubbleRef.current && !bubbleRef.current.contains(e.target as Node)) {
+        setActionsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [actionsOpen]);
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText('!' + message.id).then(() => {
@@ -232,16 +249,56 @@ const MessageBubble: React.FC<{
 
   const emojiOnly = !isPinboard && !message.attachments.length && isEmojiOnly(message.body);
 
+  const actionButtons = (
+    <>
+      <button
+        type="button"
+        onClick={handleCopyLink}
+        title="Copy message link"
+        className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors"
+      >
+        {copied ? (
+          <span className="text-sm text-indigo-500 font-bold leading-none">✓</span>
+        ) : (
+          <Link2 size={14} />
+        )}
+      </button>
+      {isPinboard ? (
+        <button
+          type="button"
+          onClick={() => message.pinnedFromMessageId && onUnpin(message.pinnedFromMessageId)}
+          title="Unpin"
+          className="w-7 h-7 flex items-center justify-center rounded-lg text-amber-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
+        >
+          <PinOff size={14} />
+        </button>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => onReply(message.id)}
+            title="Reply"
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors"
+          >
+            <CornerUpLeft size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onPin(message)}
+            title="Pin for everyone"
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
+          >
+            <Pin size={14} />
+          </button>
+        </>
+      )}
+    </>
+  );
+
   return (
-    <div data-msgid={message.id} className={`group/msg flex flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
+    <div data-msgid={message.id} className={`group/msg relative w-full flex flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
       {lightbox && (
         <Lightbox src={lightbox.src} name={lightbox.name} onClose={() => setLightbox(null)} />
-      )}
-      {/* Author name — hidden when grouped or it's our own message */}
-      {!isMine && !isGrouped && (
-        <span className="text-xs font-semibold px-1" style={{ color: message.authorColor }}>
-          {message.authorName}
-        </span>
       )}
       {/* Pinboard origin label */}
       {isPinboard && message.pinnedFromThreadId && (
@@ -259,105 +316,90 @@ const MessageBubble: React.FC<{
           })()}
         </button>
       )}
-      {emojiOnly ? (
-        /* Emoji-only bubble: large, no background */
-        <div className={`max-w-[90%] px-1 py-0.5 text-4xl leading-none select-none ${isMine ? 'text-right' : 'text-left'}`}>
-          {message.body}
-        </div>
-      ) : (
-        <div
-          className={`max-w-[90%] rounded-2xl px-3 py-2 text-sm break-words ${
-            isPinboard
-              ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-slate-900 dark:text-neutral-100 rounded-bl-sm'
-              : isMine
-                ? 'bg-indigo-600 text-white rounded-br-sm'
-                : 'bg-slate-100 dark:bg-neutral-800 text-slate-900 dark:text-neutral-100 rounded-bl-sm'
-          }`}
+
+      {/* Bubble + actions */}
+      <div className={`w-full flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+        <div ref={bubbleRef} className={`relative inline-flex flex-col max-w-[85%] ${!showTimestamp && isLong ? 'cursor-pointer' : ''}`}
+          onClick={() => { if (!showTimestamp && isLong) setActionsOpen(prev => !prev); }}
         >
-          {message.body && (
-            <div className="whitespace-pre-wrap leading-relaxed">
-              {renderBody(message.body, isMine && !isPinboard, threads, resolveMessage, onSwitchThread, onJumpToMessage)}
+          {/* Side actions for SHORT non-tail grouped messages — float on the outer edge */}
+          {!showTimestamp && !isLong && (
+            <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity ${
+              isMine ? 'right-full mr-1 flex-row-reverse' : 'left-full ml-1'
+            }`}>
+              {actionButtons}
             </div>
           )}
-          {message.attachments.map((att, idx) =>
-            att.mimeType.startsWith('image/') ? (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setLightbox({ src: att.dataURL, name: att.name })}
-                className="mt-1.5 block focus:outline-none group/img"
-                title="Click to expand"
-              >
-                <img
-                  src={att.dataURL}
-                  alt={att.name}
-                  className="max-w-[200px] rounded-lg border border-black/10 group-hover/img:opacity-90 transition-opacity cursor-zoom-in"
-                />
-              </button>
-            ) : (
-              <a
-                key={idx}
-                href={att.dataURL}
-                download={att.name}
-                className={`mt-1.5 flex items-center gap-1.5 text-xs underline ${isMine && !isPinboard ? 'text-white/80' : 'text-indigo-600 dark:text-indigo-400'}`}
-              >
-                <Paperclip size={12} />
-                {att.name} ({(att.size / 1024).toFixed(1)} KB)
-              </a>
-            )
-          )}
-        </div>
-      )}
-      {/* Timestamp + hover actions — always present but timestamp hidden when grouped (shows on hover) */}
-      <div className={`flex items-center gap-1.5 px-1 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
-        <span className={`text-xs text-slate-400 dark:text-neutral-500 transition-opacity ${isGrouped ? 'opacity-0 group-hover/msg:opacity-100' : ''}`}>
-          {time}
-        </span>
-        <div className="flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity">
-          <button
-            type="button"
-            onClick={handleCopyLink}
-            title="Copy message link"
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors"
+
+        {emojiOnly ? (
+          <div className={`px-1 py-0.5 text-4xl leading-none select-none ${isMine ? 'text-right' : 'text-left'}`}>
+            {message.body}
+          </div>
+        ) : (
+          <div
+            className={`min-w-0 rounded-2xl px-3 py-2 text-sm ${
+              isPinboard
+                ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-slate-900 dark:text-neutral-100 rounded-bl-sm'
+                : isMine
+                  ? 'bg-indigo-600 text-white rounded-br-sm'
+                  : 'bg-slate-100 dark:bg-neutral-800 text-slate-900 dark:text-neutral-100 rounded-bl-sm'
+            }`}
           >
-            {copied ? (
-              <span className="text-sm text-indigo-500 font-bold leading-none">✓</span>
-            ) : (
-              <Link2 size={16} />
+            {message.body && (
+              <div className="whitespace-pre-wrap leading-relaxed break-words" style={{ overflowWrap: 'anywhere' }}>
+                {renderBody(message.body, isMine && !isPinboard, threads, resolveMessage, onSwitchThread, onJumpToMessage)}
+              </div>
             )}
-          </button>
-          {isPinboard ? (
-            /* Unpin button — only shown in pinboard view */
-            <button
-              type="button"
-              onClick={() => message.pinnedFromMessageId && onUnpin(message.pinnedFromMessageId)}
-              title="Unpin"
-              className="w-8 h-8 flex items-center justify-center rounded-lg text-amber-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
+            {message.attachments.map((att, idx) =>
+              att.mimeType.startsWith('image/') ? (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setLightbox({ src: att.dataURL, name: att.name })}
+                  className="mt-1.5 block focus:outline-none group/img"
+                  title="Click to expand"
+                >
+                  <img
+                    src={att.dataURL}
+                    alt={att.name}
+                    className="max-w-[200px] rounded-lg border border-black/10 group-hover/img:opacity-90 transition-opacity cursor-zoom-in"
+                  />
+                </button>
+              ) : (
+                <a
+                  key={idx}
+                  href={att.dataURL}
+                  download={att.name}
+                  className={`mt-1.5 flex items-center gap-1.5 text-xs underline ${isMine && !isPinboard ? 'text-white/80' : 'text-indigo-600 dark:text-indigo-400'}`}
+                >
+                  <Paperclip size={12} />
+                  {att.name} ({(att.size / 1024).toFixed(1)} KB)
+                </a>
+              )
+            )}
+          </div>
+        )}
+          {/* Below-bubble actions for LONG non-tail messages — shown on click */}
+          {!showTimestamp && isLong && (
+            <div
+              className={`flex items-center gap-0.5 pt-1 ${isMine ? 'justify-end' : 'justify-start'}`}
+              style={{ display: actionsOpen ? 'flex' : 'none' }}
             >
-              <PinOff size={16} />
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => onReply(message.id)}
-                title="Reply"
-                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors"
-              >
-                <CornerUpLeft size={16} />
-              </button>
-              <button
-                type="button"
-                onClick={() => onPin(message)}
-                title="Pin for everyone"
-                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
-              >
-                <Pin size={16} />
-              </button>
-            </>
+              {actionButtons}
+            </div>
           )}
         </div>
       </div>
+
+      {/* Timestamp + actions row — only on last message in group */}
+      {showTimestamp && (
+        <div className={`w-full flex items-center gap-1.5 px-1 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
+          <span className="text-xs text-slate-400 dark:text-neutral-500">{time}</span>
+          <div className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+            {actionButtons}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -538,30 +580,68 @@ export const ChatThreadView: React.FC<ChatThreadViewProps> = ({
             No messages yet. Say hello!
           </p>
         )}
-        <div className="flex flex-col gap-1">
-          {messages.map((msg, idx) => {
-            const prev = messages[idx - 1];
-            const isGrouped =
-              !!prev &&
-              prev.authorId === msg.authorId &&
-              msg.timestamp - prev.timestamp < GROUP_THRESHOLD_MS;
-            return (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                isMine={msg.authorId === myId}
-                isPinboard={isPinboard}
-                isGrouped={isGrouped}
-                threads={threads}
-                resolveMessage={resolveMessage}
-                onSwitchThread={onSwitchThread}
-                onJumpToMessage={onJumpToMessage}
-                onReply={handleReply}
-                onPin={onPin}
-                onUnpin={onUnpin}
-              />
-            );
-          })}
+        <div className="flex flex-col gap-3">
+          {(() => {
+            // Pinboard: no grouping — each pin is standalone
+            if (isPinboard) {
+              return messages.map(msg => (
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  isMine={msg.authorId === myId}
+                  isPinboard={true}
+                  showTimestamp={true}
+                  threads={threads}
+                  resolveMessage={resolveMessage}
+                  onSwitchThread={onSwitchThread}
+                  onJumpToMessage={onJumpToMessage}
+                  onReply={handleReply}
+                  onPin={onPin}
+                  onUnpin={onUnpin}
+                />
+              ));
+            }
+
+            // Regular thread: split into burst groups
+            type Group = { authorId: string; authorName: string; authorColor: string; msgs: ChatMessage[] };
+            const groups: Group[] = [];
+            for (const msg of messages) {
+              const last = groups[groups.length - 1];
+              if (last && last.authorId === msg.authorId && msg.timestamp - last.msgs[last.msgs.length - 1].timestamp < GROUP_THRESHOLD_MS) {
+                last.msgs.push(msg);
+              } else {
+                groups.push({ authorId: msg.authorId, authorName: msg.authorName, authorColor: msg.authorColor, msgs: [msg] });
+              }
+            }
+            return groups.map((group, gi) => {
+              const isMine = group.authorId === myId;
+              return (
+                <div key={gi} className={`w-full flex flex-col gap-[3px] ${isMine ? 'items-end' : 'items-start'}`}>
+                  {!isMine && (
+                    <span className="text-xs font-semibold px-1" style={{ color: group.authorColor }}>
+                      {group.authorName}
+                    </span>
+                  )}
+                  {group.msgs.map((msg, mi) => (
+                    <MessageBubble
+                      key={msg.id}
+                      message={msg}
+                      isMine={isMine}
+                      isPinboard={false}
+                      showTimestamp={mi === group.msgs.length - 1}
+                      threads={threads}
+                      resolveMessage={resolveMessage}
+                      onSwitchThread={onSwitchThread}
+                      onJumpToMessage={onJumpToMessage}
+                      onReply={handleReply}
+                      onPin={onPin}
+                      onUnpin={onUnpin}
+                    />
+                  ))}
+                </div>
+              );
+            });
+          })()}
         </div>
         <div ref={bottomRef} />
       </div>
