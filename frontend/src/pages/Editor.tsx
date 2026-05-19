@@ -10,7 +10,7 @@ import clsx from 'clsx';
 import { getInitialLangCode, LanguageSelector } from '../components/LanguageSelector';
 import debounce from 'lodash/debounce';
 import throttle from 'lodash/throttle';
-import { ArrowLeft, AtSign, ChevronDown, ChevronUp, Download, History, Loader2, MessageSquare, Share2, X } from 'lucide-react';
+import { ArrowLeft, AtSign, ChevronDown, ChevronUp, Download, History, Loader2, MessageSquare, Pencil, Share2, X } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Socket, io } from 'socket.io-client';
@@ -939,6 +939,7 @@ export const Editor: React.FC = () => {
     appState: {
       viewBackgroundColor: '#ffffff',
       gridSize: null,
+      gridModeEnabled: true,
       collaborators: new Map(),
     },
     files: {},
@@ -1678,17 +1679,18 @@ export const Editor: React.FC = () => {
     return () => window.clearInterval(interval);
   }, [id, isReady, emitFilesDeltaIfNeeded]);
 
-  const handleRenameSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleRenameSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!canEdit) return;
-    if (newName.trim() && id) {
-      setDrawingName(newName);
-      setIsRenaming(false);
-      try {
-        await api.updateDrawing(id, { name: newName });
-      } catch (err) {
-        console.error("Failed to rename", err);
-      }
+    const trimmed = newName.trim();
+    setIsRenaming(false);
+    if (!trimmed || !id) return;
+    if (trimmed === drawingName) return;
+    setDrawingName(trimmed);
+    try {
+      await api.updateDrawing(id, { name: trimmed });
+    } catch (err) {
+      console.error("Failed to rename", err);
     }
   };
 
@@ -1798,17 +1800,25 @@ export const Editor: React.FC = () => {
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                onBlur={() => setIsRenaming(false)}
+                onBlur={() => handleRenameSubmit()}
+                onKeyDown={(e) => { if (e.key === 'Escape') { setIsRenaming(false); } }}
                 className="font-medium text-gray-900 dark:text-white bg-transparent px-2 py-1 border-2 border-indigo-500 rounded-md outline-none min-w-[200px]"
                 style={{ width: `${Math.max(200, newName.length * 9 + 20)}px` }}
               />
             </form>
           ) : (
             <h1
-              className="font-medium text-gray-900 dark:text-white px-2 py-1 hover:bg-gray-100 dark:hover:bg-neutral-800 rounded cursor-text"
-              onDoubleClick={() => { if (!canEdit) return; setNewName(drawingName); setIsRenaming(true); }}
+              className={clsx(
+                "group flex items-center gap-1.5 font-medium text-gray-900 dark:text-white px-2 py-1 rounded transition-colors",
+                canEdit && "cursor-text hover:bg-gray-100 dark:hover:bg-neutral-800"
+              )}
+              onClick={() => { if (!canEdit) return; setNewName(drawingName); setIsRenaming(true); }}
+              title={canEdit ? "Click to rename" : undefined}
             >
               {drawingName}
+              {canEdit && (
+                <Pencil size={13} className="opacity-0 group-hover:opacity-50 transition-opacity flex-shrink-0" />
+              )}
             </h1>
           )}
         </div>
@@ -2026,7 +2036,7 @@ export const Editor: React.FC = () => {
                   elements,
                   appState: {
                     ...snapshot.appState,
-                    collaborators: undefined,
+                    collaborators: new Map(),
                   },
                   captureUpdate: CaptureUpdateAction.NEVER,
                 });

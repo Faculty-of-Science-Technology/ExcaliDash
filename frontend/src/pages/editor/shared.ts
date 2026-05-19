@@ -42,9 +42,9 @@ export const getPersistedAppState = (appState: Record<string, any> | null | unde
   const base: Record<string, any> = {
     viewBackgroundColor: appState?.viewBackgroundColor ?? "#ffffff",
     gridSize: appState?.gridSize ?? null,
+    gridModeEnabled: appState?.gridModeEnabled ?? true,
   };
   if (appState?.gridStep != null) base.gridStep = appState.gridStep;
-  if (appState?.gridModeEnabled != null) base.gridModeEnabled = appState.gridModeEnabled;
   return base;
 };
 
