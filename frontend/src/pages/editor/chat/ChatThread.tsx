@@ -206,7 +206,7 @@ const MessageBubble: React.FC<{
         <Lightbox src={lightbox.src} name={lightbox.name} onClose={() => setLightbox(null)} />
       )}
       {!isMine && (
-        <span className="text-[10px] font-semibold px-1" style={{ color: message.authorColor }}>
+        <span className="text-xs font-semibold px-1" style={{ color: message.authorColor }}>
           {message.authorName}
         </span>
       )}
@@ -251,28 +251,28 @@ const MessageBubble: React.FC<{
         )}
       </div>
       {/* Timestamp + hover actions */}
-      <div className={`flex items-center gap-1 px-1 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
-        <span className="text-[9px] text-slate-400 dark:text-neutral-500">{time}</span>
-        <div className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+      <div className={`flex items-center gap-1.5 px-1 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
+        <span className="text-xs text-slate-400 dark:text-neutral-500">{time}</span>
+        <div className="flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity">
           <button
             type="button"
             onClick={handleCopyLink}
             title="Copy message link"
-            className="p-0.5 rounded text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors"
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors"
           >
             {copied ? (
-              <span className="text-[9px] text-indigo-500 font-semibold leading-none">✓</span>
+              <span className="text-sm text-indigo-500 font-bold leading-none">✓</span>
             ) : (
-              <Link2 size={10} />
+              <Link2 size={16} />
             )}
           </button>
           <button
             type="button"
             onClick={() => onReply(message.id)}
             title="Reply"
-            className="p-0.5 rounded text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors"
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors"
           >
-            <CornerUpLeft size={10} />
+            <CornerUpLeft size={16} />
           </button>
         </div>
       </div>

@@ -7,7 +7,7 @@ import {
 import clsx from 'clsx';
 import debounce from 'lodash/debounce';
 import throttle from 'lodash/throttle';
-import { ArrowLeft, ChevronDown, ChevronUp, Download, Loader2, MessageSquare, Share2 } from 'lucide-react';
+import { ArrowLeft, AtSign, ChevronDown, ChevronUp, Download, Loader2, MessageSquare, Share2, X } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Socket, io } from 'socket.io-client';
@@ -213,6 +213,12 @@ export const Editor: React.FC = () => {
   const chatPanelRef = useRef<ChatPanelHandle | null>(null);
   const isChatOpenRef = useRef(false);
   useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
+
+  interface MentionToast { id: string; authorName: string; authorColor: string; threadName: string; snippet: string; threadId: string; }
+  const [mentionToasts, setMentionToasts] = useState<MentionToast[]>([]);
+  const dismissMentionToast = useCallback((id: string) => {
+    setMentionToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
   const { isHeaderVisible, setIsHeaderVisible } = useEditorChrome({
     drawingName,
     autoHideEnabled,
@@ -711,6 +717,23 @@ export const Editor: React.FC = () => {
       // Show unread dot if panel is closed
       if (!isChatOpenRef.current) {
         setChatUnread(true);
+      }
+      // Show mention toast if I'm tagged
+      const me = socketMeRef.current;
+      if (payload.message.mentionedUserIds.includes(me.id)) {
+        const snippet = payload.message.body
+          ? payload.message.body.slice(0, 80) + (payload.message.body.length > 80 ? '…' : '')
+          : '[attachment]';
+        const toastItem: MentionToast = {
+          id: `${payload.message.id}-toast`,
+          authorName: payload.message.authorName,
+          authorColor: payload.message.authorColor,
+          threadName: payload.message.threadName ?? payload.threadId,
+          snippet,
+          threadId: payload.threadId,
+        };
+        setMentionToasts(prev => [...prev, toastItem]);
+        setTimeout(() => dismissMentionToast(toastItem.id), 5000);
       }
     });
 
@@ -1948,6 +1971,46 @@ export const Editor: React.FC = () => {
           onClose={() => setIsChatOpen(false)}
         />
       ) : null}
+
+      {/* Mention toasts — rendered outside ChatPanel so they work even when chat is closed */}
+      {mentionToasts.length > 0 && (
+        <div className="fixed top-14 right-4 z-[9999] flex flex-col gap-2 w-72 pointer-events-none">
+          {mentionToasts.map(toast => (
+            <div
+              key={toast.id}
+              className="pointer-events-auto flex items-start gap-2.5 bg-white dark:bg-neutral-800 border border-indigo-200 dark:border-indigo-700 rounded-xl shadow-lg px-3 py-2.5 animate-in slide-in-from-top-2 fade-in duration-200"
+            >
+              <div
+                className="mt-0.5 w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0"
+                style={{ backgroundColor: toast.authorColor }}
+              >
+                <AtSign size={14} className="text-white" />
+              </div>
+              <button
+                className="flex-1 text-left min-w-0"
+                onClick={() => {
+                  setIsChatOpen(true);
+                  setChatUnread(false);
+                  dismissMentionToast(toast.id);
+                }}
+              >
+                <div className="text-xs font-semibold text-slate-900 dark:text-neutral-100 truncate">
+                  <span style={{ color: toast.authorColor }}>{toast.authorName}</span>
+                  <span className="text-slate-500 dark:text-neutral-400 font-normal"> mentioned you in </span>
+                  <span className="text-indigo-600 dark:text-indigo-400">#{toast.threadName}</span>
+                </div>
+                <div className="text-xs text-slate-500 dark:text-neutral-400 truncate mt-0.5">{toast.snippet}</div>
+              </button>
+              <button
+                onClick={() => dismissMentionToast(toast.id)}
+                className="p-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-neutral-200 transition-colors flex-shrink-0"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

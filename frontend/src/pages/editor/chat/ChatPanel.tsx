@@ -6,7 +6,8 @@ import {
   useImperativeHandle,
   useRef,
   useState,
-} from 'react';import { Socket } from 'socket.io-client';
+} from 'react';
+import { Socket } from 'socket.io-client';
 import type { ChatAttachment, ChatMessage, ChatMessagePayload, ChatThread } from './ChatTypes';
 import { ChatThreadView } from './ChatThread';
 import { useChatStorage } from './useChatStorage';
@@ -191,14 +192,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(({
   const handleJumpToMessage = useCallback(async (msgId: string) => {
     const msg = await storageRef.current.getMessage(msgId);
     if (!msg) return;
-    if (msg.threadId !== activeThreadId) {
-      setActiveThreadId(msg.threadId);
-      // Wait for messages to load before signalling scroll
-      setScrollToMessageId(msgId);
-    } else {
-      setScrollToMessageId(msgId);
-    }
-  }, [activeThreadId]);
+    setActiveThreadId(msg.threadId);
+    setScrollToMessageId(msgId);
+  }, []);
 
   return (
     <div className="fixed right-0 top-0 h-full w-80 z-[60] flex flex-col bg-white dark:bg-neutral-900 border-l border-slate-200 dark:border-neutral-700 shadow-2xl">
@@ -259,6 +255,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(({
           </div>
         </div>
       )}
+
       {/* Header */}
       <div className="px-4 py-3 border-b border-slate-200 dark:border-neutral-700 flex items-center gap-2 flex-shrink-0">
         <span className="text-sm font-semibold text-slate-900 dark:text-neutral-100 flex-1 truncate">
