@@ -1,4 +1,4 @@
-import { CornerUpLeft, Download, Link2, Paperclip, Pin, PinOff, Send, X } from 'lucide-react';
+import { ChevronDown, CornerUpLeft, Download, Link2, Paperclip, Pin, PinOff, Send, X } from 'lucide-react';
 import React, {
   useCallback,
   useEffect,
@@ -9,6 +9,21 @@ import React, {
 import type { ChatAttachment, ChatMessage, ChatThread } from './ChatTypes';
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5 MB
+const GROUP_THRESHOLD_MS = 60_000; // messages within 60s from same author are grouped
+
+/** Returns true if the text consists of 1–3 emoji grapheme clusters and nothing else. */
+const isEmojiOnly = (text: string): boolean => {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  try {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    const segments = [...segmenter.segment(trimmed)].map(s => s.segment);
+    if (segments.length < 1 || segments.length > 3) return false;
+    return segments.every(s => /^\p{Extended_Pictographic}/u.test(s));
+  } catch {
+    return false;
+  }
+};
 
 interface Peer {
   id: string;
@@ -191,6 +206,7 @@ const MessageBubble: React.FC<{
   message: ChatMessage;
   isMine: boolean;
   isPinboard: boolean;
+  isGrouped: boolean;
   threads: ChatThread[];
   resolveMessage: (id: string) => Promise<ChatMessage | undefined>;
   onSwitchThread: (threadId: string) => void;
@@ -198,7 +214,7 @@ const MessageBubble: React.FC<{
   onReply: (msgId: string) => void;
   onPin: (message: ChatMessage) => void;
   onUnpin: (originalMessageId: string) => void;
-}> = ({ message, isMine, isPinboard, threads, resolveMessage, onSwitchThread, onJumpToMessage, onReply, onPin, onUnpin }) => {
+}> = ({ message, isMine, isPinboard, isGrouped, threads, resolveMessage, onSwitchThread, onJumpToMessage, onReply, onPin, onUnpin }) => {
   const [lightbox, setLightbox] = useState<{ src: string; name: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -214,12 +230,15 @@ const MessageBubble: React.FC<{
     });
   };
 
+  const emojiOnly = !isPinboard && !message.attachments.length && isEmojiOnly(message.body);
+
   return (
     <div data-msgid={message.id} className={`group/msg flex flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
       {lightbox && (
         <Lightbox src={lightbox.src} name={lightbox.name} onClose={() => setLightbox(null)} />
       )}
-      {!isMine && (
+      {/* Author name — hidden when grouped or it's our own message */}
+      {!isMine && !isGrouped && (
         <span className="text-xs font-semibold px-1" style={{ color: message.authorColor }}>
           {message.authorName}
         </span>
@@ -240,51 +259,60 @@ const MessageBubble: React.FC<{
           })()}
         </button>
       )}
-      <div
-        className={`max-w-[90%] rounded-2xl px-3 py-2 text-sm break-words ${
-          isPinboard
-            ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-slate-900 dark:text-neutral-100 rounded-bl-sm'
-            : isMine
-              ? 'bg-indigo-600 text-white rounded-br-sm'
-              : 'bg-slate-100 dark:bg-neutral-800 text-slate-900 dark:text-neutral-100 rounded-bl-sm'
-        }`}
-      >
-        {message.body && (
-          <div className="whitespace-pre-wrap leading-relaxed">
-            {renderBody(message.body, isMine && !isPinboard, threads, resolveMessage, onSwitchThread, onJumpToMessage)}
-          </div>
-        )}
-        {message.attachments.map((att, idx) =>
-          att.mimeType.startsWith('image/') ? (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => setLightbox({ src: att.dataURL, name: att.name })}
-              className="mt-1.5 block focus:outline-none group/img"
-              title="Click to expand"
-            >
-              <img
-                src={att.dataURL}
-                alt={att.name}
-                className="max-w-[200px] rounded-lg border border-black/10 group-hover/img:opacity-90 transition-opacity cursor-zoom-in"
-              />
-            </button>
-          ) : (
-            <a
-              key={idx}
-              href={att.dataURL}
-              download={att.name}
-              className={`mt-1.5 flex items-center gap-1.5 text-xs underline ${isMine && !isPinboard ? 'text-white/80' : 'text-indigo-600 dark:text-indigo-400'}`}
-            >
-              <Paperclip size={12} />
-              {att.name} ({(att.size / 1024).toFixed(1)} KB)
-            </a>
-          )
-        )}
-      </div>
-      {/* Timestamp + hover actions */}
+      {emojiOnly ? (
+        /* Emoji-only bubble: large, no background */
+        <div className={`max-w-[90%] px-1 py-0.5 text-4xl leading-none select-none ${isMine ? 'text-right' : 'text-left'}`}>
+          {message.body}
+        </div>
+      ) : (
+        <div
+          className={`max-w-[90%] rounded-2xl px-3 py-2 text-sm break-words ${
+            isPinboard
+              ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-slate-900 dark:text-neutral-100 rounded-bl-sm'
+              : isMine
+                ? 'bg-indigo-600 text-white rounded-br-sm'
+                : 'bg-slate-100 dark:bg-neutral-800 text-slate-900 dark:text-neutral-100 rounded-bl-sm'
+          }`}
+        >
+          {message.body && (
+            <div className="whitespace-pre-wrap leading-relaxed">
+              {renderBody(message.body, isMine && !isPinboard, threads, resolveMessage, onSwitchThread, onJumpToMessage)}
+            </div>
+          )}
+          {message.attachments.map((att, idx) =>
+            att.mimeType.startsWith('image/') ? (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => setLightbox({ src: att.dataURL, name: att.name })}
+                className="mt-1.5 block focus:outline-none group/img"
+                title="Click to expand"
+              >
+                <img
+                  src={att.dataURL}
+                  alt={att.name}
+                  className="max-w-[200px] rounded-lg border border-black/10 group-hover/img:opacity-90 transition-opacity cursor-zoom-in"
+                />
+              </button>
+            ) : (
+              <a
+                key={idx}
+                href={att.dataURL}
+                download={att.name}
+                className={`mt-1.5 flex items-center gap-1.5 text-xs underline ${isMine && !isPinboard ? 'text-white/80' : 'text-indigo-600 dark:text-indigo-400'}`}
+              >
+                <Paperclip size={12} />
+                {att.name} ({(att.size / 1024).toFixed(1)} KB)
+              </a>
+            )
+          )}
+        </div>
+      )}
+      {/* Timestamp + hover actions — always present but timestamp hidden when grouped (shows on hover) */}
       <div className={`flex items-center gap-1.5 px-1 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
-        <span className="text-xs text-slate-400 dark:text-neutral-500">{time}</span>
+        <span className={`text-xs text-slate-400 dark:text-neutral-500 transition-opacity ${isGrouped ? 'opacity-0 group-hover/msg:opacity-100' : ''}`}>
+          {time}
+        </span>
         <div className="flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity">
           <button
             type="button"
@@ -354,10 +382,23 @@ export const ChatThreadView: React.FC<ChatThreadViewProps> = ({
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionStart, setMentionStart] = useState(0);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Track whether the user has scrolled away from the bottom
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setShowScrollDown(distFromBottom > 80);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
 
   // Auto-scroll to bottom when new messages arrive (only if no pending scroll target)
   useLayoutEffect(() => {
@@ -489,31 +530,53 @@ export const ChatThreadView: React.FC<ChatThreadViewProps> = ({
     : [];
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col h-full min-h-0 relative">
       {/* Messages */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3 min-h-0 scrollbar-thin scrollbar-thumb-slate-300 hover:scrollbar-thumb-slate-400 dark:scrollbar-thumb-neutral-600 dark:hover:scrollbar-thumb-neutral-500 scrollbar-track-transparent">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-3 py-3 min-h-0 scrollbar-thin scrollbar-thumb-slate-300 hover:scrollbar-thumb-slate-400 dark:scrollbar-thumb-neutral-600 dark:hover:scrollbar-thumb-neutral-500 scrollbar-track-transparent">
         {messages.length === 0 && (
           <p className="text-center text-xs text-slate-400 dark:text-neutral-500 pt-6">
             No messages yet. Say hello!
           </p>
         )}
-        {messages.map(msg => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            isMine={msg.authorId === myId}
-            isPinboard={isPinboard}
-            threads={threads}
-            resolveMessage={resolveMessage}
-            onSwitchThread={onSwitchThread}
-            onJumpToMessage={onJumpToMessage}
-            onReply={handleReply}
-            onPin={onPin}
-            onUnpin={onUnpin}
-          />
-        ))}
+        <div className="flex flex-col gap-1">
+          {messages.map((msg, idx) => {
+            const prev = messages[idx - 1];
+            const isGrouped =
+              !!prev &&
+              prev.authorId === msg.authorId &&
+              msg.timestamp - prev.timestamp < GROUP_THRESHOLD_MS;
+            return (
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                isMine={msg.authorId === myId}
+                isPinboard={isPinboard}
+                isGrouped={isGrouped}
+                threads={threads}
+                resolveMessage={resolveMessage}
+                onSwitchThread={onSwitchThread}
+                onJumpToMessage={onJumpToMessage}
+                onReply={handleReply}
+                onPin={onPin}
+                onUnpin={onUnpin}
+              />
+            );
+          })}
+        </div>
         <div ref={bottomRef} />
       </div>
+
+      {/* Scroll-to-bottom button */}
+      {showScrollDown && (
+        <button
+          type="button"
+          onClick={() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' })}
+          className="absolute bottom-[72px] left-1/2 -translate-x-1/2 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 shadow-md text-slate-500 dark:text-neutral-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-600 transition-colors"
+          title="Scroll to bottom"
+        >
+          <ChevronDown size={16} />
+        </button>
+      )}
 
       {/* Pending attachments preview */}
       {!isPinboard && pendingAttachments.length > 0 && (
