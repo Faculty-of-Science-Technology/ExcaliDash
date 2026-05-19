@@ -375,12 +375,14 @@ export const ChatThreadView: React.FC<ChatThreadViewProps> = ({
     }
   }, [scrollToMessageId, messages, onScrollConsumed]);
 
-  // Auto-resize textarea to fit content
+  // Auto-resize textarea to fit content; only enable scrollbar when capped at max-height
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     el.style.height = 'auto';
+    const capped = el.scrollHeight > 200;
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    el.style.overflowY = capped ? 'auto' : 'hidden';
   }, [body]);
 
   // Reply: prepend !<id>\n to input, focus, and move cursor to end of typed content
@@ -587,7 +589,7 @@ export const ChatThreadView: React.FC<ChatThreadViewProps> = ({
           onKeyDown={handleKeyDown}
           rows={1}
           placeholder="Message… (Shift+Enter for new line)"
-          className="flex-1 resize-none text-sm px-3 py-2 rounded-xl bg-slate-50 dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 text-slate-900 dark:text-neutral-100 placeholder:text-slate-400 outline-none focus:border-indigo-400 transition-colors min-h-[38px] max-h-[200px] leading-relaxed overflow-y-auto"
+          className="flex-1 resize-none text-sm px-3 py-2 rounded-xl bg-slate-50 dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 text-slate-900 dark:text-neutral-100 placeholder:text-slate-400 outline-none focus:border-indigo-400 transition-colors min-h-[38px] max-h-[200px] leading-relaxed overflow-y-hidden scrollbar-thin scrollbar-thumb-slate-300 hover:scrollbar-thumb-slate-400 dark:scrollbar-thumb-neutral-600 dark:hover:scrollbar-thumb-neutral-500 scrollbar-track-transparent"
         />
         <input
           ref={fileInputRef}
