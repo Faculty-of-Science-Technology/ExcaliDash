@@ -1,5 +1,5 @@
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -33,7 +33,7 @@ COPY src ./src
 RUN npx tsc
 
 # Production stage
-FROM node:20-alpine
+FROM node:22-alpine
 
 # Database provider: "sqlite" (default) or "postgresql"
 ARG DB_PROVIDER=sqlite
