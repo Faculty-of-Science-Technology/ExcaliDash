@@ -59,6 +59,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(({
   const newThreadInputRef = useRef<HTMLInputElement>(null);
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState<string | null>(null);
+  const [scrollToMessageId, setScrollToMessageId] = useState<string | null>(null);
 
   // ── Bootstrap ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -147,8 +148,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(({
 
   // ── Create thread ─────────────────────────────────────────────────────────────
   const handleCreateThread = useCallback(async () => {
-    const name = (newThreadInputRef.current?.value ?? '').trim();
-    if (!name) return;
+    const raw = (newThreadInputRef.current?.value ?? '').trim();
+    if (!raw) return;
+    const name = raw.replace(/\s+/g, '_');
     setIsCreatingThread(false);
     setNewThreadName('');
     const newThread: ChatThread = {
@@ -179,6 +181,24 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(({
   }, [activeThreadId]);
 
   const activeThread = threads.find(t => t.id === activeThreadId);
+
+  // ── Resolve a message by id from IDB (for !<id> previews) ────────────────────
+  const resolveMessage = useCallback(async (id: string): Promise<ChatMessage | undefined> => {
+    return storageRef.current.getMessage(id);
+  }, []);
+
+  // ── Jump to a message: switch thread then signal scroll ───────────────────────
+  const handleJumpToMessage = useCallback(async (msgId: string) => {
+    const msg = await storageRef.current.getMessage(msgId);
+    if (!msg) return;
+    if (msg.threadId !== activeThreadId) {
+      setActiveThreadId(msg.threadId);
+      // Wait for messages to load before signalling scroll
+      setScrollToMessageId(msgId);
+    } else {
+      setScrollToMessageId(msgId);
+    }
+  }, [activeThreadId]);
 
   return (
     <div className="fixed right-0 top-0 h-full w-80 z-[60] flex flex-col bg-white dark:bg-neutral-900 border-l border-slate-200 dark:border-neutral-700 shadow-2xl">
@@ -212,6 +232,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(({
               maxLength={40}
               className="text-sm px-3 py-2 rounded-xl bg-slate-50 dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 text-slate-900 dark:text-neutral-100 placeholder:text-slate-400 outline-none focus:border-indigo-400 transition-colors"
             />
+            {/\s/.test(newThreadName) && (
+              <div className="flex items-start gap-1.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg px-2.5 py-2">
+                <span className="text-amber-500 text-xs mt-px flex-shrink-0">⚠</span>
+                <p className="text-[11px] text-amber-700 dark:text-amber-300 leading-snug">
+                  Spaces aren't allowed in thread names. It will be created as{' '}
+                  <span className="font-semibold">"{newThreadName.replace(/\s+/g, '_')}"</span>.
+                </p>
+              </div>
+            )}
             <div className="flex gap-2">
               <button
                 onClick={() => void handleCreateThread()}
@@ -353,8 +382,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(({
           peers={peers}
           threads={threads}
           myId={myId}
+          resolveMessage={resolveMessage}
           onSend={handleSend}
           onSwitchThread={setActiveThreadId}
+          onJumpToMessage={handleJumpToMessage}
+          scrollToMessageId={scrollToMessageId}
+          onScrollConsumed={() => setScrollToMessageId(null)}
         />
       </div>
     </div>

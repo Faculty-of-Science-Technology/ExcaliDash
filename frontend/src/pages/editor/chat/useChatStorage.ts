@@ -112,6 +112,12 @@ export const useChatStorage = (drawingId: string) => {
 
   // ── Messages ───────────────────────────────────────────────────────────────
 
+  const getMessage = useCallback(async (id: string): Promise<ChatMessage | undefined> => {
+    const db = await getDb();
+    const tx = db.transaction('messages', 'readonly');
+    return idbGet<ChatMessage>(tx.objectStore('messages'), id);
+  }, [getDb]);
+
   const getMessages = useCallback(async (threadId: string): Promise<ChatMessage[]> => {
     const db = await getDb();
     const tx = db.transaction('messages', 'readonly');
@@ -142,8 +148,9 @@ export const useChatStorage = (drawingId: string) => {
     ensureMainThread,
     addThread,
     deleteThread,
+    getMessage,
     getMessages,
     addMessage,
     clearThread,
-  }), [getThreads, ensureMainThread, addThread, deleteThread, getMessages, addMessage, clearThread]);
+  }), [getThreads, ensureMainThread, addThread, deleteThread, getMessage, getMessages, addMessage, clearThread]);
 };

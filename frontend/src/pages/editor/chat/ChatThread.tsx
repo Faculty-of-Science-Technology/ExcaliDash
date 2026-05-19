@@ -1,11 +1,11 @@
-import { Download, Paperclip, Send, X } from 'lucide-react';
+import { CornerUpLeft, Download, Link2, Paperclip, Send, X } from 'lucide-react';
 import React, {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
-} from 'react';
-import type { ChatAttachment, ChatMessage, ChatThread } from './ChatTypes';
+} from 'react';import type { ChatAttachment, ChatMessage, ChatThread } from './ChatTypes';
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5 MB
 
@@ -21,8 +21,12 @@ interface ChatThreadViewProps {
   peers: Peer[];
   threads: ChatThread[];
   myId: string;
+  resolveMessage: (id: string) => Promise<ChatMessage | undefined>;
   onSend: (body: string, attachments: ChatAttachment[], mentionedUserIds: string[]) => void;
   onSwitchThread: (threadId: string) => void;
+  onJumpToMessage: (msgId: string) => void;
+  scrollToMessageId: string | null;
+  onScrollConsumed: () => void;
 }
 
 // ─── Lightbox ─────────────────────────────────────────────────────────────────
@@ -62,14 +66,69 @@ const Lightbox: React.FC<{ src: string; name: string; onClose: () => void }> = (
   </div>
 );
 
-// ─── Mention parsing ──────────────────────────────────────────────────────────
+// ─── Inline message preview (for !<id> tokens) ────────────────────────────────
+const MessagePreviewInline: React.FC<{
+  messageId: string;
+  isMine: boolean;
+  threads: ChatThread[];
+  resolveMessage: (id: string) => Promise<ChatMessage | undefined>;
+  onJumpToMessage: (msgId: string) => void;
+}> = ({ messageId, isMine, threads, resolveMessage, onJumpToMessage }) => {
+  // undefined = still loading, null = not found
+  const [msg, setMsg] = useState<ChatMessage | undefined | null>(undefined);
+
+  useEffect(() => {
+    resolveMessage(messageId).then(m => setMsg(m ?? null));
+  }, [messageId, resolveMessage]);
+
+  if (msg === undefined) return null;
+
+  if (msg === null) {
+    return (
+      <span className={`font-semibold ${isMine ? 'text-white/70' : 'text-slate-500 dark:text-neutral-500'}`}>
+        !{messageId}
+      </span>
+    );
+  }
+
+  const thread = threads.find(t => t.id === msg.threadId);
+  const preview = msg.body
+    ? msg.body.slice(0, 100) + (msg.body.length > 100 ? '…' : '')
+    : '[attachment]';
+
+  return (
+    <button
+      type="button"
+      onClick={() => onJumpToMessage(messageId)}
+      className={`mt-1.5 block w-full text-left rounded-lg px-2.5 py-2 border-l-2 transition-colors ${
+        isMine
+          ? 'bg-white/10 border-white/50 hover:bg-white/20'
+          : 'bg-slate-200/70 dark:bg-neutral-700/60 border-indigo-400 dark:border-indigo-500 hover:bg-slate-200 dark:hover:bg-neutral-700'
+      }`}
+    >
+      <div
+        className="text-[10px] font-semibold mb-0.5 truncate"
+        style={isMine ? { color: 'rgba(255,255,255,0.7)' } : { color: msg.authorColor }}
+      >
+        {msg.authorName}{thread ? ` · #${thread.name}` : ''}
+      </div>
+      <div className={`text-xs leading-snug line-clamp-2 ${isMine ? 'text-white/75' : 'text-slate-600 dark:text-neutral-400'}`}>
+        {preview}
+      </div>
+    </button>
+  );
+};
+
+// ─── Body renderer ─────────────────────────────────────────────────────────────
 const renderBody = (
   body: string,
   isMine: boolean,
   threads: ChatThread[],
+  resolveMessage: (id: string) => Promise<ChatMessage | undefined>,
   onSwitchThread: (threadId: string) => void,
+  onJumpToMessage: (msgId: string) => void,
 ): React.ReactNode[] => {
-  const parts = body.split(/([@#]\S+)/g);
+  const parts = body.split(/([@#!]\S+)/g);
   return parts.map((part, i) => {
     if (part.startsWith('@')) {
       return (
@@ -93,11 +152,23 @@ const renderBody = (
           </button>
         );
       }
-      // Thread doesn't exist locally — render as bold text only
       return (
         <span key={i} className={`font-semibold ${isMine ? 'text-white/80' : 'text-slate-600 dark:text-neutral-400'}`}>
           {part}
         </span>
+      );
+    }
+    if (part.startsWith('!') && part.length > 1) {
+      const msgId = part.slice(1);
+      return (
+        <MessagePreviewInline
+          key={i}
+          messageId={msgId}
+          isMine={isMine}
+          threads={threads}
+          resolveMessage={resolveMessage}
+          onJumpToMessage={onJumpToMessage}
+        />
       );
     }
     return <React.Fragment key={i}>{part}</React.Fragment>;
@@ -109,17 +180,28 @@ const MessageBubble: React.FC<{
   message: ChatMessage;
   isMine: boolean;
   threads: ChatThread[];
+  resolveMessage: (id: string) => Promise<ChatMessage | undefined>;
   onSwitchThread: (threadId: string) => void;
-}> = ({ message, isMine, threads, onSwitchThread }) => {
+  onJumpToMessage: (msgId: string) => void;
+  onReply: (msgId: string) => void;
+}> = ({ message, isMine, threads, resolveMessage, onSwitchThread, onJumpToMessage, onReply }) => {
   const [lightbox, setLightbox] = useState<{ src: string; name: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const time = new Date(message.timestamp).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
   });
 
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText('!' + message.id).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
   return (
-    <div className={`flex flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
+    <div data-msgid={message.id} className={`group/msg flex flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
       {lightbox && (
         <Lightbox src={lightbox.src} name={lightbox.name} onClose={() => setLightbox(null)} />
       )}
@@ -135,7 +217,11 @@ const MessageBubble: React.FC<{
             : 'bg-slate-100 dark:bg-neutral-800 text-slate-900 dark:text-neutral-100 rounded-bl-sm'
         }`}
       >
-        {message.body && <p className="whitespace-pre-wrap leading-relaxed">{renderBody(message.body, isMine, threads, onSwitchThread)}</p>}
+        {message.body && (
+          <div className="whitespace-pre-wrap leading-relaxed">
+            {renderBody(message.body, isMine, threads, resolveMessage, onSwitchThread, onJumpToMessage)}
+          </div>
+        )}
         {message.attachments.map((att, idx) =>
           att.mimeType.startsWith('image/') ? (
             <button
@@ -164,7 +250,32 @@ const MessageBubble: React.FC<{
           )
         )}
       </div>
-      <span className="text-[9px] text-slate-400 dark:text-neutral-500 px-1">{time}</span>
+      {/* Timestamp + hover actions */}
+      <div className={`flex items-center gap-1 px-1 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
+        <span className="text-[9px] text-slate-400 dark:text-neutral-500">{time}</span>
+        <div className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+          <button
+            type="button"
+            onClick={handleCopyLink}
+            title="Copy message link"
+            className="p-0.5 rounded text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors"
+          >
+            {copied ? (
+              <span className="text-[9px] text-indigo-500 font-semibold leading-none">✓</span>
+            ) : (
+              <Link2 size={10} />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => onReply(message.id)}
+            title="Reply"
+            className="p-0.5 rounded text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors"
+          >
+            <CornerUpLeft size={10} />
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
@@ -175,28 +286,67 @@ export const ChatThreadView: React.FC<ChatThreadViewProps> = ({
   peers,
   threads,
   myId,
+  resolveMessage,
   onSend,
   onSwitchThread,
+  onJumpToMessage,
+  scrollToMessageId,
+  onScrollConsumed,
 }) => {
   const [body, setBody] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionStart, setMentionStart] = useState(0);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive (only if no pending scroll target)
   useLayoutEffect(() => {
+    if (scrollToMessageId) return;
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+  }, [messages.length, scrollToMessageId]);
+
+  // Scroll to a specific message when requested
+  useLayoutEffect(() => {
+    if (!scrollToMessageId) return;
+    const el = scrollContainerRef.current?.querySelector(`[data-msgid="${scrollToMessageId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      onScrollConsumed();
+    }
+  }, [scrollToMessageId, messages, onScrollConsumed]);
+
+  // Auto-resize textarea to fit content
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [body]);
+
+  // Reply: prepend !<id>\n to input, focus, and move cursor to end of typed content
+  const handleReply = useCallback((msgId: string) => {
+    const prefix = `!${msgId}\n`;
+    setBody(prev => {
+      const next = prefix + prev;
+      // Schedule cursor placement after state flushes
+      setTimeout(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(next.length, next.length);
+      }, 0);
+      return next;
+    });
+  }, []);
 
   // Detect @mention trigger as user types
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setBody(val);
 
-    // Find the last @ before the cursor
     const cursor = e.target.selectionStart ?? val.length;
     const before = val.slice(0, cursor);
     const atIdx = before.lastIndexOf('@');
@@ -221,7 +371,6 @@ export const ChatThreadView: React.FC<ChatThreadViewProps> = ({
     }, 0);
   }, [body, mentionStart]);
 
-  // Extract mentioned user IDs from the body string at send time
   const extractMentions = useCallback((text: string): string[] => {
     const tokens = text.match(/@(\S+)/g)?.map(t => t.slice(1)) ?? [];
     return peers
@@ -246,7 +395,6 @@ export const ChatThreadView: React.FC<ChatThreadViewProps> = ({
     }
   }, [handleSend]);
 
-  // Attachment file read
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = '';
@@ -268,15 +416,13 @@ export const ChatThreadView: React.FC<ChatThreadViewProps> = ({
   }, []);
 
   const filteredPeers = mentionQuery !== null
-    ? peers.filter(
-        p => p.id !== myId && p.name.toLowerCase().includes(mentionQuery.toLowerCase())
-      )
+    ? peers.filter(p => p.id !== myId && p.name.toLowerCase().includes(mentionQuery.toLowerCase()))
     : [];
 
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 min-h-0">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3 min-h-0">
         {messages.length === 0 && (
           <p className="text-center text-xs text-slate-400 dark:text-neutral-500 pt-6">
             No messages yet. Say hello!
@@ -288,7 +434,10 @@ export const ChatThreadView: React.FC<ChatThreadViewProps> = ({
             message={msg}
             isMine={msg.authorId === myId}
             threads={threads}
+            resolveMessage={resolveMessage}
             onSwitchThread={onSwitchThread}
+            onJumpToMessage={onJumpToMessage}
+            onReply={handleReply}
           />
         ))}
         <div ref={bottomRef} />
@@ -351,8 +500,7 @@ export const ChatThreadView: React.FC<ChatThreadViewProps> = ({
           onKeyDown={handleKeyDown}
           rows={1}
           placeholder="Message… (Shift+Enter for new line)"
-          className="flex-1 resize-none text-sm px-3 py-2 rounded-xl bg-slate-50 dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 text-slate-900 dark:text-neutral-100 placeholder:text-slate-400 outline-none focus:border-indigo-400 transition-colors min-h-[38px] max-h-[120px] leading-relaxed"
-          style={{ height: Math.min(120, Math.max(38, body.split('\n').length * 22)) }}
+          className="flex-1 resize-none text-sm px-3 py-2 rounded-xl bg-slate-50 dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 text-slate-900 dark:text-neutral-100 placeholder:text-slate-400 outline-none focus:border-indigo-400 transition-colors min-h-[38px] max-h-[200px] leading-relaxed overflow-y-auto"
         />
         <input
           ref={fileInputRef}
